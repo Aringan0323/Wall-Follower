@@ -91,14 +91,6 @@ class follower:
         else:
             return ind * math.pi/180
 
-
-    '''
-    Returns the angle of the farthest range in radians
-    '''
-    def farthest_angle(self):
-        return np.argmax(self.clean_ranges()) * math.pi/180
-
-
     '''
     Returns closest range in meters
     '''
@@ -106,14 +98,31 @@ class follower:
         return np.amin(self.clean_ranges())
 
 
-    '''
-    Returns the farthest range in meters
-    '''
-    def farthest_dist(self):
-        return np.amax(self.clean_ranges())
-    
+    def nearest_front_dist(self, direction=0):
+        rngs = self.clean_ranges()
+        left_min = np.amin(rngs[0:15])
+        if direction == 1:
+            return left_min
+        right_min = np.amin(rngs[345:360])
+        if direction == -1:
+            return right_min
+        final_min = min(left_min, right_min)
+        return final_min
 
-    
+    def nearest_front_angle(self, direction=0):
+        rngs = self.clean_ranges()
+        left_ind = np.argmin(rngs[0:15])
+        if direction == 1:
+            return left_ind * (math.pi/180)
+        right_ind = np.argmin(rngs[345:360]) + 345
+        if direction == -1:
+            return right_ind * (math.pi/180)
+        left_min = np.amin(rngs[0:15])
+        right_min = np.amin(rngs[345:360])
+        if right_min < left_min:
+            return right_ind * (math.pi/180)
+        else:
+            return left_ind * (math.pi/180)
 
     
     '''
@@ -220,51 +229,69 @@ class follower:
         self.rate.sleep()
         # self.dead_end_rotate()
         z = self.PID(kp, kd, kp2)
-        self.update_twist(0.2, z)
+        x = self.correct_vel_linear(self.nearest_front_dist() - 0.4, 0.2)
+        self.update_twist(x, z)
 
 
-    def wall_dist(self, dwall):
-        if self.clean_ranges()[self.wall_angle(False, index = True)] > (2*dwall):
-            return self.nearest_angle(), True
-        else:
-            return self.wall_angle(False), False
+    # def wall_dist(self, dwall):
+    #     if self.clean_ranges()[self.wall_angle(False, index = True)] > (2*dwall):
+    #         return self.nearest_angle(), True
+    #     else:
+    #         return self.wall_angle(False), False
 
-    def wall_angle(self, adjacent, index = False):
-        if adjacent:
-            angle = self.nearest_angle(index=True)
-        else:
-            if self.nearest_angle() <= math.pi:
-                angle = np.argmin(self.clean_ranges()[270:355])
-            else:
-                angle = np.argmin(self.clean_ranges()[5:90])
-        if not index:
-            angle = angle * math.pi/180
-        return angle
+    # def wall_angle(self, adjacent, index = False):
+    #     if adjacent:
+    #         angle = self.nearest_angle(index=True)
+    #     else:
+    #         if self.nearest_angle() <= math.pi:
+    #             angle = np.argmin(self.clean_ranges()[270:355])
+    #         else:
+    #             angle = np.argmin(self.clean_ranges()[5:90])
+    #     if not index:
+    #         angle = angle * math.pi/180
+    #     return angle
 
 
-    def decide_wall(self):
-        rngs = self.clean_ranges()
-        left_rngs = rngs[0:180]
-        right_rngs = rngs[180:360]
-        left_avg = np.average(left_rngs)
-        right_avg = np.average(right_rngs)
+    # def corner_type(self):
+    #     rngs = self.clean_ranges()
+    #     front_left = np.average(rngs[0:45])
+    #     front_right = np.average(rngs[315:360])
+    #     front_average = np.average(np.array([front_left, front_right]))
+    #     back_left = np.average(rngs[135:180])
+    #     back_right = round(np.average(rngs[180:225]),1)
+    #     back_average = round(np.average(np.array([back_left, back_right])),1)
+    #     if front_average < back_average:
+    #         print("Inner corner")
+    #         return 'i'
+    #     elif front_average > back_average:
+    #         print("Outer corner")
+    #         return 'o'
+    #     else:
+    #         print("Neither inner nor outer")
+    #         return 'n'
 
     '''
     Uses equation from paper linked below to calculate the angular
     velocity of a robot so that it remains perpendicular the nearest wall
+
+    https://github.com/ssscassio/ros-wall-follower-2-wheeled-robot/blob/master/report/Wall-following-algorithm-for-reactive%20autonomous-mobile-robot-with-laser-scanner-sensor.pdf
     '''
     def PID(self, kp, kd, kp2):
-        tn = rospy.Time.now().to_sec()
-        dmin = self.nearest_dist()
         dwall = 0.5
+        tn = rospy.Time.now().to_sec()
         amin = self.nearest_angle()
         
-
-        if amin <= math.pi:
+        if amin >= math.pi:
             di = 1
         else:
             di = -1
-            amin = amin - 2*math.pi
+
+        front_dist = self.clean_ranges()[0]
+        if front_dist <= 0.6:
+            dmin = self.nearest_front_dist(direction = di)
+            amin = self.nearest_front_angle(direction = di)
+        else:
+            dmin = self.nearest_dist()
         
         wall_err = dmin - dwall
         wall_err_prev = self.dmin_prev - dwall
@@ -279,14 +306,6 @@ class follower:
 
         self.tn_prev = tn
         self.dmin_prev = dmin
-        system('clear')
-        print("Minimum distance: {} meters".format(dmin))
-        print("Minimum angle: {} radians".format(amin))
-        if di < 0:
-            print("Wall is on right side")
-        else:
-            print("Wall is on left side")
-        print("\n\n")
 
         return final_angular_velocity
 
@@ -307,14 +326,6 @@ class follower:
             self.update_twist(0,0)
             self.rotate_towards_angle(math.pi)
 
-    
-    def find_wall_break_cb(self):
-        if self.nearest_dist >= 0.5:
-            return True
-        else:
-            return False
-
-
 
 f = follower()
 
@@ -327,7 +338,7 @@ f.move_to_wall()
 
 
 while not rospy.is_shutdown():
-    f.follow_wall(0.7, 0.7, 1)
+    f.follow_wall(0.7, 0.7, 0.8)
     f.rate.sleep()
 
     
