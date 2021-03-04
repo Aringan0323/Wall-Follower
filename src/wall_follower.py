@@ -99,13 +99,13 @@ class follower:
 
     def rotate_towards_angle(self, angle):
         curr = self.get_rotation()
-        if curr > math.pi:
+        if curr >= math.pi:
             curr = curr - math.pi*2
         diff = self.diff(curr,angle)
         direction = self.get_direction(curr, angle)
         while (diff > 0.005) and not rospy.is_shutdown():
             curr = self.get_rotation()
-            if curr > math.pi:
+            if curr >= math.pi:
                 curr = curr - math.pi*2
             diff = self.diff(curr, angle)
             z = self.correct_vel_rotation(diff, math.pi/3) * direction
@@ -128,11 +128,9 @@ class follower:
     def follow_wall(self, kp, kd, kp2):
         self.tn_prev = rospy.Time.now().to_sec()
         self.dmin_prev = self.nearest_dist()
-        while self.follow_wall_break_cb() and not rospy.is_shutdown():
-            z = self.PID(kp, kd, kp2)
-            self.update_twist(0.2, z)
-            self.rate.sleep()
-        self.update_twist(0,0)
+        self.rate.sleep()
+        z = self.PID(kp, kd, kp2)
+        self.update_twist(0.2, z)
 
 
 
@@ -178,15 +176,18 @@ class follower:
 
 f = follower()
 
-time.sleep(0.5)
 
+kp = input("kp: ")
+kd = input("kd: ")
+kp2 = input("kp2: ")
+#Best values: 0.7, 0.7, 0.8
 
 
 f.move_to_wall()
 
-f.follow_wall(0.5,0.5,0.5)
 
-        
-
+while not rospy.is_shutdown():
+    f.follow_wall(kp,kd,kp2)
+    f.rate.sleep()
 
     
