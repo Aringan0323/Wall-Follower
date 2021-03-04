@@ -60,8 +60,12 @@ class follower:
         return rot
 
 
-    def nearest_angle(self):
-        return np.argmin(self.clean_ranges()) * math.pi/180
+    def nearest_angle(self, index = False):
+        ind = np.argmin(self.clean_ranges())
+        if index:
+            return ind
+        else:
+            return ind * math.pi/180
 
     def farthest_angle(self):
         return np.argmax(self.clean_ranges()) * math.pi/180
@@ -71,6 +75,26 @@ class follower:
 
     def farthest_dist(self):
         return np.amax(self.clean_ranges())
+    
+
+    def wall_dist(self, dwall):
+        if self.clean_ranges()[self.wall_angle(False, index = True)] > (2*dwall):
+            return self.nearest_angle(), True
+        else:
+            return self.wall_angle(False), False
+
+    def wall_angle(self, adjacent, index = False):
+        if adjacent:
+            angle = self.nearest_angle(index=True)
+        else:
+            if self.nearest_angle() <= math.pi:
+                angle = np.argmin(self.clean_ranges()[270:355])
+            else:
+                angle = np.argmin(self.clean_ranges()[5:90])
+        if not index:
+            angle = angle * math.pi/180
+        return angle
+
     
 
     def update_twist(self, x, z):
@@ -133,12 +157,14 @@ class follower:
         self.update_twist(0.2, z)
 
 
+    
 
     def PID(self, kp, kd, kp2):
         tn = rospy.Time.now().to_sec()
-        dmin = self.nearest_dist()
+        dmin, adjacent = self.wall_dist(0.5)
         dwall = 0.5
-        amin = self.nearest_angle()
+        amin = self.wall_angle(adjacent)
+
         if amin <= math.pi:
             di = 1
         else:
@@ -146,9 +172,11 @@ class follower:
         
         wall_err = dmin - dwall
         wall_err_prev = self.dmin_prev - dwall
-        PDct = kp * wall_err + kd * ( (wall_err-wall_err_prev) / (tn-self.tn_prev+1e-10) )
+
+        PDct = kp * wall_err + kd * ( (wall_err - wall_err_prev) / (tn - self.tn_prev + 1e-10) )
 
         a_err = amin - (math.pi/2)*di
+
         Pct = kp2*a_err
 
         final_angular_velocity = PDct + Pct
