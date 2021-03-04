@@ -339,6 +339,5 @@ f.move_to_wall()
 
 while not rospy.is_shutdown():
     f.follow_wall(0.7, 0.7, 0.8)
-    f.rate.sleep()
 
     
