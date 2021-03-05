@@ -97,7 +97,10 @@ class follower:
     def nearest_dist(self):
         return np.amin(self.clean_ranges())
 
-
+    '''
+    Returns the nearest distance within a 30 degree cone in front of the
+    robot
+    '''
     def nearest_front_dist(self, direction=0):
         rngs = self.clean_ranges()
         left_min = np.amin(rngs[0:15])
@@ -109,6 +112,11 @@ class follower:
         final_min = min(left_min, right_min)
         return final_min
 
+
+    '''
+    Returns the angle of the nearest distance within a 30 degree cone in front
+    of the robot
+    '''
     def nearest_front_angle(self, direction=0):
         rngs = self.clean_ranges()
         left_ind = np.argmin(rngs[0:15])
@@ -142,7 +150,6 @@ class follower:
     Defines an asymptotic function that can only reach up to the
     specified maximum velocity and approaches close to 0 when the
     specified difference approaches 0.
-
     Desmos link for both linear and rotational breaking curves:
     https://www.desmos.com/calculator/nj1sgvhtxb
     linear : green
@@ -156,7 +163,6 @@ class follower:
     Defines an asymptotic function that can only reach up to the
     specified maximum velocity and approaches close to 0 when the
     specified difference approaches 0.
-
     Desmos link for both linear and rotational breaking curves:
     https://www.desmos.com/calculator/nj1sgvhtxb
     linear : green
@@ -208,136 +214,104 @@ class follower:
     '''
     Rotates and moves the robot to 0.5 meters away from the nearest wall
     '''
-    def move_to_wall(self):
+    def move_to_wall(self, dwall):
         self.update_twist(0,0)
         angle_to_wall = self.nearest_angle()
         if angle_to_wall > math.pi:
             angle_to_wall = angle_to_wall - math.pi*2
         self.rotate_towards_angle(angle_to_wall)
-        while self.nearest_dist() > 0.5:
-            x = self.correct_vel_linear(self.nearest_dist()-0.49, 0.2)
+        while self.nearest_dist() > dwall:
+            x = self.correct_vel_linear(self.nearest_dist()-(dwall-0.01), 0.2)
             self.update_twist(x, 0)
         self.update_twist(0,0)
     
-
     '''
-    Uses PID controller to move the robot along the nearest wall
+    Initializes the previous time and minimum distance values for the PID controller to avoid
+    divide by zero error
     '''
-    def follow_wall(self, kp, kd, kp2):
+    def set_prev_values(self):
         self.tn_prev = rospy.Time.now().to_sec()
         self.dmin_prev = self.nearest_dist()
+
+
+    '''
+    Uses PID controller to move the robot along the nearest wall. Takes in the parameters kp, kd, and kp2 as
+    the tuned parameters for the PID controller. These values are best at 0.7, 0.7, and 0.8 respectively. Takes
+    in dwall as a parameter indicating the preferred distance the robot should be from the wall.
+    '''
+    def follow_wall(self, kp, kd, kp2, dwall):
         self.rate.sleep()
-        # self.dead_end_rotate()
-        z = self.PID(kp, kd, kp2)
-        x = self.correct_vel_linear(self.nearest_front_dist() - 0.4, 0.2)
+        z = self.PID(kp, kd, kp2, dwall)
+        x = self.correct_vel_linear(self.nearest_front_dist() - (dwall - (dwall/5)), 0.2)
         self.update_twist(x, z)
 
-
-    # def wall_dist(self, dwall):
-    #     if self.clean_ranges()[self.wall_angle(False, index = True)] > (2*dwall):
-    #         return self.nearest_angle(), True
-    #     else:
-    #         return self.wall_angle(False), False
-
-    # def wall_angle(self, adjacent, index = False):
-    #     if adjacent:
-    #         angle = self.nearest_angle(index=True)
-    #     else:
-    #         if self.nearest_angle() <= math.pi:
-    #             angle = np.argmin(self.clean_ranges()[270:355])
-    #         else:
-    #             angle = np.argmin(self.clean_ranges()[5:90])
-    #     if not index:
-    #         angle = angle * math.pi/180
-    #     return angle
-
-
-    # def corner_type(self):
-    #     rngs = self.clean_ranges()
-    #     front_left = np.average(rngs[0:45])
-    #     front_right = np.average(rngs[315:360])
-    #     front_average = np.average(np.array([front_left, front_right]))
-    #     back_left = np.average(rngs[135:180])
-    #     back_right = round(np.average(rngs[180:225]),1)
-    #     back_average = round(np.average(np.array([back_left, back_right])),1)
-    #     if front_average < back_average:
-    #         print("Inner corner")
-    #         return 'i'
-    #     elif front_average > back_average:
-    #         print("Outer corner")
-    #         return 'o'
-    #     else:
-    #         print("Neither inner nor outer")
-    #         return 'n'
 
     '''
     Uses equation from paper linked below to calculate the angular
     velocity of a robot so that it remains perpendicular the nearest wall
-
     https://github.com/ssscassio/ros-wall-follower-2-wheeled-robot/blob/master/report/Wall-following-algorithm-for-reactive%20autonomous-mobile-robot-with-laser-scanner-sensor.pdf
     '''
-    def PID(self, kp, kd, kp2):
-        dwall = 0.5
+    def PID(self, kp, kd, kp2, dwall):
         tn = rospy.Time.now().to_sec()
         amin = self.nearest_angle()
-        
-        if amin >= math.pi:
-            di = 1
-        else:
-            di = -1
+        system('clear')
 
+        # Checks the direction of the wall with respect to the robot
+        if amin >= math.pi:
+            di = -1
+        else:
+            di = 1
+        dmin = self.nearest_dist()
+        
+        
+        # If the robot is coming up to a corner, it changes the wall it follows to the
+        # wall in front of it for a smoother transition
+        new_wall_detected_str = ""
         front_dist = self.clean_ranges()[0]
         if front_dist <= 0.6:
             dmin = self.nearest_front_dist(direction = di)
             amin = self.nearest_front_angle(direction = di)
-        else:
-            dmin = self.nearest_dist()
+            new_wall_detected_str = "\n***NEW WALL DETECTED***"
+            
         
         wall_err = dmin - dwall
         wall_err_prev = self.dmin_prev - dwall
 
-        PDct = kp * wall_err + kd * ( (wall_err - wall_err_prev) / (tn - self.tn_prev) )
+        PDct = kp * wall_err + kd * ( (wall_err - wall_err_prev) / (tn - self.tn_prev + 1e-10) )
 
         a_err = amin - (math.pi/2)*di
 
         Pct = kp2*a_err
 
-        final_angular_velocity = PDct + Pct
+        final_angular_velocity = (PDct + Pct)
+        
 
         self.tn_prev = tn
         self.dmin_prev = dmin
 
+
+        print("Distance from the followed wall: {} meters".format(round(dmin, 2)))
+        print("Angle from the followed wall: {} degrees".format(amin*(180/math.pi)))
+        print(new_wall_detected_str)
         return final_angular_velocity
 
-
-    def dead_end_check(self):
-        rngs = self.clean_ranges()
-        for i in range(0, 90):
-            if rngs[i] > 0.5:
-                return False
-        for j in range(270,360):
-            if rngs[j] > 0.5:
-                return False
-        return True
-
-    def dead_end_rotate(self):
-        rngs = self.clean_ranges()
-        if self.dead_end_check():
-            self.update_twist(0,0)
-            self.rotate_towards_angle(math.pi)
 
 
 f = follower()
 
 
-#Best values: 0.7, 0.7, 0.8
 
 time.sleep(0.25)
 
-f.move_to_wall()
+f.move_to_wall(0.3)
 
+f.set_prev_values()
 
 while not rospy.is_shutdown():
-    f.follow_wall(0.7, 0.7, 0.8)
-
     
+    # Best values: 
+    #   0.7 for kp 
+    #   0.7 for kd 
+    #   0.8 for kp2
+    f.follow_wall(0.7, 0.7, 0.8, 0.3)
+    f.rate.sleep()
